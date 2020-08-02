@@ -50,7 +50,7 @@ usage: log_parser <log file>
 
 
 ### Использование в виде подключаемой библиотеки
-```
+```python
 from log_parser import parse_log_line, parse_log_lines
 
 print('Single line:')
