@@ -8,9 +8,15 @@ parser = SerialParser(
     PositionalExtractor(
         7,
         keys_prefix='param',
-        unescape_values=False
+        escape_replacements=[
+            (r'\\\|', '|')
+        ]
     ),
-    KeywordExtractor()
+    KeywordExtractor(
+        escape_replacements=[
+            (r'\\\=', '=')
+        ]
+    )
 )
 
 parse_log_line = parser.parseline

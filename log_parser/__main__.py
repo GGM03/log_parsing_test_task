@@ -23,7 +23,7 @@ def main():
         with open(file_path, 'r') as file:
             # TODO: use "readline" and "parse_log_line" instead of "parse_log_lines"
             #  to prevent copying of huge log files in memory
-            print(json.dumps(parse_log_lines(file.read()), indent=2, sort_keys=True))
+            print(json.dumps(parse_log_lines(file.read()), indent=2))
     except (FileNotFoundError, PermissionError):
         print('Cant read file!')
         exit(-1)

@@ -1,5 +1,5 @@
 import re
-from typing import Dict
+from typing import Dict, Iterable, Tuple
 from abc import ABC, abstractmethod
 
 
@@ -25,7 +25,8 @@ class SequenceSegmentExtractor(ABC):
 
 
 class PositionalExtractor(SequenceSegmentExtractor):
-    def __init__(self, values_amount: int, keys_prefix: str = 'param', unescape_values: bool = False):
+    def __init__(self, values_amount: int, keys_prefix: str = 'param',
+                 escape_replacements: Iterable[Tuple[str, str]] = None):
         r"""
         Extractor, which can process strings in format " value1 | value 2 | value 3|".
         This extractor can handle escaped delimiters, like "\|" (ex: "value 1 \| and \| value 2 " -> one value)
@@ -34,19 +35,19 @@ class PositionalExtractor(SequenceSegmentExtractor):
         :param values_amount: amount of handled positional values
         :param keys_prefix: positional values prefixes. This value used to construct found values keys by using pattern
             "{keys_prefix}{positional_id}"
-        :param unescape_values: This flag will force "unescaping" sequences from found values.
+        :param escape_replacements: List of tuples, where each tuple contain two strings in format
+            (<escape symbol regex>, <replacement for this symbol>). This replacements will be applied to each
+            found value.
         """
         positional_parts_string_regex = ''.join(
             self.positional_value_regex(keys_prefix, idx) for idx in range(1, values_amount + 1)
         )
         self.regex = re.compile(positional_parts_string_regex, flags=re.VERBOSE)
+
         # Escape replacements will be applied to every found positional value
         # format: (<escape symbol regex>, <replacement for this symbol>)
-        self.escape_replacements = [
-            # This rule will translate "\|" into "|"
-            (re.compile(r'\\\|'), '|'),
-        ]
-        self.unescape_values = unescape_values
+        escape_replacements = escape_replacements or []
+        self.escape_replacements = [(re.compile(repl[0]), repl[1]) for repl in escape_replacements]
 
     @staticmethod
     def positional_value_regex(keys_prefix, positional_id):
@@ -83,8 +84,8 @@ class PositionalExtractor(SequenceSegmentExtractor):
         match = self.regex.search(line)
         if match:
             data_dict = match.groupdict()
-            if self.unescape_values:
-                data_dict = {k: self.unescape_string(v) for k, v in data_dict.items()}
+            # Replace all known escape sequences in values
+            data_dict = {k: self.unescape_string(v) for k, v in data_dict.items()}
             return data_dict
         else:
             return {}
@@ -94,13 +95,32 @@ class PositionalExtractor(SequenceSegmentExtractor):
 
 
 class KeywordExtractor(SequenceSegmentExtractor):
-    def __init__(self):
-        self.regex = re.compile("""
+    def __init__(self, escape_replacements: Iterable[Tuple[str, str]] = None):
+        r"""
+        Extractor, which can process strings in format " key1=value1 key2=value2 with spaces key3=value3".
+
+        :param escape_replacements: List of tuples, where each tuple contain two strings in format
+            (<escape symbol regex>, <replacement for this symbol>). This replacements will be applied to each
+            found value.
+        """
+        self.regex = re.compile(r"""
                 [ ]                 # space symbol on start of key=value pair
-                ([^ =|]+)           # key definition (any symbol except " ", "|", "=")
+                ([^ =|]+[^\\])      # key definition (any symbol except ' ', '|', '=') and without '\' as last char
                 =                   # "=" symbol between parts
-                ([^ ].*)            # value or other key=value pairs (any symbols except " " on start of group)
+                ([^ ].*)            # value or other key=value pairs (any symbols except ' ' on start of group)
             """, flags=re.VERBOSE)
+        escape_replacements = escape_replacements or []
+        self.escape_replacements = [(re.compile(repl[0]), repl[1]) for repl in escape_replacements]
+
+    def unescape_string(self, string: str) -> str:
+        """
+        This function unescapes sequences by using "self.escape_replacements" rules in string.
+        :param string:
+        :return: string with replaced chars
+        """
+        for escape_regex, escape_replacer in self.escape_replacements:
+            string = escape_regex.sub(escape_replacer, string)
+        return string
 
     def extract(self, line: str) -> Dict[str, str]:
         # Using example: input string: "key1=value1 key2=value2"
@@ -129,12 +149,14 @@ class KeywordExtractor(SequenceSegmentExtractor):
         else:
             # If no other "key=value" pairs found, use tail as found key value
             extracted[key] = tail
+        # Replace all known escape sequences in values
+        extracted = {k: self.unescape_string(v) for k, v in extracted.items()}
         return extracted
 
     def crop(self, line: str) -> str:
         match = self.regex.match(line)
         if not match:
-            return ''
+            return line
         _, tail = match.groups()
         if self.regex.search(tail):
             tail = self.crop(tail)
